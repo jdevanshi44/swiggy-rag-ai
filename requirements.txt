@@ -3,6 +3,7 @@ langchain
 langchain-community
 langchain-groq
 langchain-huggingface
-pypdf
+pymupdf
+rapidocr-onnxruntime
 faiss-cpu
 sentence-transformers

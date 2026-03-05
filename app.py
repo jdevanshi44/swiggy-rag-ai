@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -9,55 +9,62 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# --- Page Configuration ---
-st.set_page_config(page_title="Swiggy AI Assistant", layout="wide")
+st.set_page_config(page_title="Swiggy AI Assistant Pro", layout="wide")
 st.title("🤖 Swiggy AI Assistant")
 
-# --- Helper Function: Format Documents ---
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
-# --- Core RAG Logic ---
 def setup_rag(file_path):
-    # 1. Load PDF
-    loader = PyPDFLoader(file_path)
+    # 1. Advanced Loader: PyMuPDF is much better at preserving table structures
+    # and can extract text from images if rapidocr is installed
+    loader = PyMuPDFLoader(file_path)
     data = loader.load()
     
-    # 2. Split Text (Optimized for financial reports)
-    splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
+    # 2. Strategic Chunking
+    # Smaller chunks with significant overlap ensure that "minute details" 
+    # and numbers in tables aren't cut off from their headers.
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=600, 
+        chunk_overlap=120,
+        separators=["\n\n", "\n", "|", ".", " "] # Added pipe symbol for tables
+    )
     chunks = splitter.split_documents(data)
     
-    # 3. Embeddings & Vector Store
-    # Note: Ensure sentence-transformers is in requirements.txt
+    # 3. Embeddings
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-    vectorstore = FAISS.from_documents(chunks, embeddings)
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     
-    # 4. Initialize LLM via Groq (Uses Streamlit Secrets)
-    # This line will only work if GROQ_API_KEY is in your Secrets
+    # 4. Vector Store
+    vectorstore = FAISS.from_documents(chunks, embeddings)
+    
+    # 5. Increase Retrieval Count (k=7)
+    # Annual reports are dense; we need more context for "minute details"
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 7})
+    
+    # 6. LLM (Using Llama 3.3 70B for its high reasoning capabilities)
     llm = ChatGroq(
         temperature=0, 
         groq_api_key=st.secrets["GROQ_API_KEY"], 
         model_name="llama-3.3-70b-versatile"
     )
     
-    # 5. Prompt Design
-    template = """You are a helpful AI assistant for Swiggy. 
-    Use the following pieces of retrieved context to answer the question. 
-    If the answer isn't in the context, say you don't know. 
-    Do not use outside information.
+    # 7. Financial Analyst Prompt
+    template = """You are an expert Financial Analyst. Answer the question based ONLY on the provided context.
+    The context may contain tables where data is separated by spaces or bars. 
+    Pay close attention to numbers, dates, and currency (INR/Millions).
+    
+    If the answer involves a list or a table, format it clearly using bullet points or markdown tables.
+    If the context doesn't contain the answer, say "This specific detail is not mentioned in the report."
 
     Context:
     {context}
 
     Question: {question}
     
-    Answer:"""
+    Detailed Answer:"""
     
     prompt = ChatPromptTemplate.from_template(template)
     
-    # 6. Build the Chain (LCEL)
-    # We define rag_chain explicitly here to avoid NameError
     rag_chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
         | prompt
@@ -67,48 +74,30 @@ def setup_rag(file_path):
     
     return rag_chain, retriever
 
-# --- Sidebar UI ---
+# --- UI Logic ---
 with st.sidebar:
-    st.header("Document Upload")
-    uploaded_file = st.file_uploader("Upload Swiggy Report (PDF)", type="pdf")
-    process_btn = st.button("Initialize Analyst")
+    st.header("Settings")
+    uploaded_file = st.file_uploader("Upload Swiggy Report", type="pdf")
+    if st.button("Deep Sync Document"):
+        if uploaded_file:
+            with st.spinner("Processing text and tables..."):
+                with open("temp_report.pdf", "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                chain, retriever_obj = setup_rag("temp_report.pdf")
+                st.session_state.rag_chain = chain
+                st.session_state.retriever = retriever_obj
+                st.success("Deep Analysis Complete!")
 
-# --- Main Execution ---
-if process_btn:
-    if uploaded_file is not None:
-        with st.spinner("Analyzing document..."):
-            # Save the uploaded file locally for the loader
-            with open("temp_report.pdf", "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            # Call the function (No key passed, it's inside st.secrets)
-            chain, retriever_obj = setup_rag("temp_report.pdf")
-            
-            # Store in session state so it persists across refreshes
-            st.session_state.rag_chain = chain
-            st.session_state.retriever = retriever_obj
-            st.success("Analysis Complete! Ask your questions below.")
-    else:
-        st.warning("Please upload a PDF file first.")
+query = st.text_input("Ask a highly specific question (e.g., specific expenses or page-level stats):")
 
-# --- Chat Interface ---
-query = st.text_input("What would you like to know from the Swiggy report?")
-
-if query:
-    if "rag_chain" in st.session_state:
-        with st.spinner("Searching for answers..."):
-            try:
-                response = st.session_state.rag_chain.invoke(query)
-                st.subheader("Answer:")
-                st.write(response)
-                
-                # Show sources (for professionalism)
-                with st.expander("View Source Evidence"):
-                    docs = st.session_state.retriever.invoke(query)
-                    for i, doc in enumerate(docs):
-                        st.markdown(f"**Source {i+1} (Page {doc.metadata.get('page', 'N/A')}):**")
-                        st.info(doc.page_content)
-            except Exception as e:
-                st.error(f"Execution Error: {str(e)}")
-    else:
-        st.info("Please initialize the analyst from the sidebar to begin.")
+if query and "rag_chain" in st.session_state:
+    with st.spinner("Scanning document for details..."):
+        response = st.session_state.rag_chain.invoke(query)
+        st.markdown("### Analysis Result:")
+        st.write(response)
+        
+        with st.expander("View Source Context (Verification)"):
+            docs = st.session_state.retriever.invoke(query)
+            for doc in docs:
+                st.write(f"**Page {doc.metadata.get('page')+1}:**")
+                st.caption(doc.page_content)
