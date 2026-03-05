@@ -26,6 +26,8 @@ def format_docs(docs):
 def setup_rag(file_path):
     loader = PyPDFLoader(file_path)
     data = loader.load()
+
+
     
     # Improved Chunking for Financial Data
     splitter = RecursiveCharacterTextSplitter(
@@ -43,8 +45,8 @@ def setup_rag(file_path):
     
     # Get key from secrets automatically
     llm = ChatGroq(
-        temperature=0.1, # Slight temperature for better reasoning
-        groq_api_key=st.secrets["GROQ_API_KEY"], 
+        temperature=0.1, 
+        groq_api_key=st.secrets["GROQ_API_KEY"], # Gets key directly from secrets
         model_name="llama-3.3-70b-versatile"
     )
     
@@ -65,7 +67,8 @@ if process_btn and uploaded_file and groq_key:
         with open("temp_report.pdf", "wb") as f:
             f.write(uploaded_file.getbuffer())
         
-        chain, retriever = setup_rag("temp_report.pdf", groq_key)
+        
+        chain, retriever = setup_rag("temp_report.pdf")
         st.session_state.rag_chain = chain
         st.session_state.retriever = retriever
         st.success("Ready!")
