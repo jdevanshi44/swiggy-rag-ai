@@ -44,12 +44,14 @@ def setup_rag(file_path):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     
     # Get key from secrets automatically
+# Internal secret fetch
     llm = ChatGroq(
         temperature=0.1, 
-        groq_api_key=st.secrets["GROQ_API_KEY"], # Gets key directly from secrets
+        groq_api_key=st.secrets["GROQ_API_KEY"], 
         model_name="llama-3.3-70b-versatile"
     )
-    
+    # ... rest of the logic ...
+    return rag_chain, retriever
     # Professional Prompt Template
     template = """You are a Financial Analyst Assistant for Swiggy. 
     Use the retrieved context to provide a precise, data-driven answer.
